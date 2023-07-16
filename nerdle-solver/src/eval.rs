@@ -18,7 +18,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::char,
-    character::complete::{digit1 as digit, space0 as space},
+    character::complete::digit1,
     combinator::map_res,
     error::ParseError,
     multi::fold_many0,
@@ -115,20 +115,18 @@ impl Val for Rational32 {
     }
 }
 
-// We parse any expr surrounded by parens, ignoring all whitespaces around those
+// We parse any expr surrounded by parens
 fn parens<V: Val>(i: &str) -> IResult<&str, V> {
-    delimited(space, delimited(tag("("), expr, tag(")")), space).parse(i)
+    delimited(tag("("), expr, tag(")")).parse(i)
 }
 
-// We transform an integer string into a Rational32, ignoring surrounding whitespaces
+// We transform an integer string into a Rational32
 // We look for a digit suite, and try to convert it.
 // If either str::from_utf8 or FromStr::from_str fail,
 // we fallback to the parens parser defined above
 fn factor<V: Val>(i: &str) -> IResult<&str, V> {
     alt((
-        map_res(delimited(space, digit, space), |s| {
-            i32::from_str(s).map(|v| V::from_integer(v))
-        }),
+        map_res(digit1, |s| i32::from_str(s).map(|v| V::from_integer(v))),
         parens,
     ))
     .parse(i)
@@ -216,11 +214,11 @@ pub fn eval(i: &str) -> Result<i32, nom::Err<nom::error::Error<&str>>> {
 
 #[test]
 fn test_evaluator() {
-    assert_eq!(eval(" (  2 )").unwrap(), 2);
-    assert_eq!(eval(" (  2 )").unwrap(), 2);
-    assert_eq!(eval(" 2* (  3 + 4 ) ").unwrap(), 14);
-    assert_eq!(eval("  2*2 / ( 5 - 1) + 3").unwrap(), 4);
-    assert_eq!(eval("(5/4) * (4/5)").unwrap(), 1);
+    assert_eq!(eval("(2)").unwrap(), 2);
+    assert_eq!(eval("(2)").unwrap(), 2);
+    assert_eq!(eval("2*(3+4)").unwrap(), 14);
+    assert_eq!(eval("2*2/(5-1)+3").unwrap(), 4);
+    assert_eq!(eval("(5/4)*(4/5)").unwrap(), 1);
     assert_eq!(eval("0³/15+3²").unwrap(), 9);
     assert!(eval("4/5").is_err());
 }
