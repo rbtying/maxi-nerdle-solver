@@ -32,7 +32,7 @@ fn make_err(i: &str, e: ComputeError) -> nom::Err<nom::error::Error<&str>> {
     nom::Err::Failure(nom::error::Error::from_error_kind(
         i,
         match e {
-            ComputeError::ComputeError => nom::error::ErrorKind::Fail,
+            ComputeError::Compute => nom::error::ErrorKind::Fail,
             ComputeError::NonIntegerDivision | ComputeError::NonIntegerResult => {
                 nom::error::ErrorKind::Float
             }
@@ -42,7 +42,7 @@ fn make_err(i: &str, e: ComputeError) -> nom::Err<nom::error::Error<&str>> {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum ComputeError {
-    ComputeError,
+    Compute,
     NonIntegerDivision,
     NonIntegerResult,
 }
@@ -59,25 +59,25 @@ trait Val: Sized + Copy + std::fmt::Debug {
 
 impl Val for i32 {
     fn add(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_add(other).ok_or(ComputeError::ComputeError)
+        self.checked_add(other).ok_or(ComputeError::Compute)
     }
     fn sub(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_sub(other).ok_or(ComputeError::ComputeError)
+        self.checked_sub(other).ok_or(ComputeError::Compute)
     }
     fn mul(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_mul(other).ok_or(ComputeError::ComputeError)
+        self.checked_mul(other).ok_or(ComputeError::Compute)
     }
     fn div(self, other: Self) -> Result<Self, ComputeError> {
         if other == 0 {
-            Err(ComputeError::ComputeError)
+            Err(ComputeError::Compute)
         } else if self % other == 0 {
-            self.checked_div(other).ok_or(ComputeError::ComputeError)
+            self.checked_div(other).ok_or(ComputeError::Compute)
         } else {
             Err(ComputeError::NonIntegerDivision)
         }
     }
     fn pow(self, pow: usize) -> Result<Self, ComputeError> {
-        checked_pow(self, pow).ok_or(ComputeError::ComputeError)
+        checked_pow(self, pow).ok_or(ComputeError::Compute)
     }
     fn to_integer(self) -> Option<i32> {
         Some(self)
@@ -89,19 +89,19 @@ impl Val for i32 {
 
 impl Val for Rational32 {
     fn add(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_add(&other).ok_or(ComputeError::ComputeError)
+        self.checked_add(&other).ok_or(ComputeError::Compute)
     }
     fn sub(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_sub(&other).ok_or(ComputeError::ComputeError)
+        self.checked_sub(&other).ok_or(ComputeError::Compute)
     }
     fn mul(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_mul(&other).ok_or(ComputeError::ComputeError)
+        self.checked_mul(&other).ok_or(ComputeError::Compute)
     }
     fn div(self, other: Self) -> Result<Self, ComputeError> {
-        self.checked_div(&other).ok_or(ComputeError::ComputeError)
+        self.checked_div(&other).ok_or(ComputeError::Compute)
     }
     fn pow(self, pow: usize) -> Result<Self, ComputeError> {
-        checked_pow(self, pow).ok_or(ComputeError::ComputeError)
+        checked_pow(self, pow).ok_or(ComputeError::Compute)
     }
     fn to_integer(self) -> Option<i32> {
         if Rational32::is_integer(&self) {
@@ -201,13 +201,13 @@ pub fn eval(i: &str) -> Result<i32, nom::Err<nom::error::Error<&str>>> {
         Err(nom::Err::Failure(f)) if f.code == nom::error::ErrorKind::Float => {
             let (rem, v) = expr::<Rational32>(i)?;
             if !rem.is_empty() {
-                Err(make_err(i, ComputeError::ComputeError))?
+                Err(make_err(i, ComputeError::Compute))?
             }
 
             v.to_integer()
                 .ok_or_else(|| make_err(i, ComputeError::NonIntegerResult))
         }
-        Ok(_) => Err(make_err(i, ComputeError::ComputeError)),
+        Ok(_) => Err(make_err(i, ComputeError::Compute)),
         Err(e) => Err(e),
     }
 }
