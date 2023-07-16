@@ -209,11 +209,14 @@ mod tests {
 
     #[test]
     fn test_gen() {
-        let mut buf = vec![0; 6];
         let mut ct = 0;
-        gen(&mut buf, &mut |_| {
-            ct += 1;
-        });
+        gen(
+            6,
+            &mut |_| {
+                ct += 1;
+            },
+            true,
+        );
 
         assert_eq!(ct, 404);
     }
