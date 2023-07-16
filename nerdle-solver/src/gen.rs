@@ -127,11 +127,10 @@ fn try_gen_eq(index: usize, depth: usize, buf: &mut [u8], visitor: &mut dyn FnMu
             return;
         }
         let v_len = if v == 0 { 1 } else { (v.ilog10() + 1) as usize };
-        drop(expr);
         if index + v_len + 1 == buf.len() {
             buf[index] = b'=';
             write!(&mut buf[index + 1..], "{}", v).unwrap();
-            visitor(std::str::from_utf8(&buf).unwrap());
+            visitor(std::str::from_utf8(buf).unwrap());
         }
     }
 }
