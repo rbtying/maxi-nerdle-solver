@@ -9,7 +9,8 @@
 //! - multiplication * and division /
 //! - addition + and subtraction -
 //!
-//! It also does its internal evaluation using rational numbers, not using integers!
+//! It also does its internal evaluation using rational numbers when necessary,
+//! since Nerdle permits intermediate fractions during evaluation.
 
 use std::str::FromStr;
 
@@ -27,8 +28,95 @@ use nom::{
 use num_rational::Rational32;
 use num_traits::{checked_pow, CheckedAdd, CheckedDiv, CheckedMul, CheckedSub};
 
+fn make_err(i: &str, e: ComputeError) -> nom::Err<nom::error::Error<&str>> {
+    nom::Err::Failure(nom::error::Error::from_error_kind(
+        i,
+        match e {
+            ComputeError::ComputeError => nom::error::ErrorKind::Fail,
+            ComputeError::NonIntegerDivision | ComputeError::NonIntegerResult => {
+                nom::error::ErrorKind::Float
+            }
+        },
+    ))
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+enum ComputeError {
+    ComputeError,
+    NonIntegerDivision,
+    NonIntegerResult,
+}
+
+trait Val: Sized + Copy + std::fmt::Debug {
+    fn add(self, other: Self) -> Result<Self, ComputeError>;
+    fn sub(self, other: Self) -> Result<Self, ComputeError>;
+    fn mul(self, other: Self) -> Result<Self, ComputeError>;
+    fn div(self, other: Self) -> Result<Self, ComputeError>;
+    fn pow(self, pow: usize) -> Result<Self, ComputeError>;
+    fn to_integer(self) -> Option<i32>;
+    fn from_integer(i: i32) -> Self;
+}
+
+impl Val for i32 {
+    fn add(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_add(other).ok_or(ComputeError::ComputeError)
+    }
+    fn sub(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_sub(other).ok_or(ComputeError::ComputeError)
+    }
+    fn mul(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_mul(other).ok_or(ComputeError::ComputeError)
+    }
+    fn div(self, other: Self) -> Result<Self, ComputeError> {
+        if other == 0 {
+            Err(ComputeError::ComputeError)
+        } else if self % other == 0 {
+            self.checked_div(other).ok_or(ComputeError::ComputeError)
+        } else {
+            Err(ComputeError::NonIntegerDivision)
+        }
+    }
+    fn pow(self, pow: usize) -> Result<Self, ComputeError> {
+        checked_pow(self, pow).ok_or(ComputeError::ComputeError)
+    }
+    fn to_integer(self) -> Option<i32> {
+        Some(self)
+    }
+    fn from_integer(i: i32) -> Self {
+        i
+    }
+}
+
+impl Val for Rational32 {
+    fn add(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_add(&other).ok_or(ComputeError::ComputeError)
+    }
+    fn sub(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_sub(&other).ok_or(ComputeError::ComputeError)
+    }
+    fn mul(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_mul(&other).ok_or(ComputeError::ComputeError)
+    }
+    fn div(self, other: Self) -> Result<Self, ComputeError> {
+        self.checked_div(&other).ok_or(ComputeError::ComputeError)
+    }
+    fn pow(self, pow: usize) -> Result<Self, ComputeError> {
+        checked_pow(self, pow).ok_or(ComputeError::ComputeError)
+    }
+    fn to_integer(self) -> Option<i32> {
+        if Rational32::is_integer(&self) {
+            Some(Rational32::to_integer(&self))
+        } else {
+            None
+        }
+    }
+    fn from_integer(i: i32) -> Self {
+        Rational32::from_integer(i)
+    }
+}
+
 // We parse any expr surrounded by parens, ignoring all whitespaces around those
-fn parens(i: &str) -> IResult<&str, Rational32> {
+fn parens<V: Val>(i: &str) -> IResult<&str, V> {
     delimited(space, delimited(tag("("), expr, tag(")")), space).parse(i)
 }
 
@@ -36,9 +124,11 @@ fn parens(i: &str) -> IResult<&str, Rational32> {
 // We look for a digit suite, and try to convert it.
 // If either str::from_utf8 or FromStr::from_str fail,
 // we fallback to the parens parser defined above
-fn factor(i: &str) -> IResult<&str, Rational32> {
+fn factor<V: Val>(i: &str) -> IResult<&str, V> {
     alt((
-        map_res(delimited(space, digit, space), FromStr::from_str),
+        map_res(delimited(space, digit, space), |s| {
+            i32::from_str(s).map(|v| V::from_integer(v))
+        }),
         parens,
     ))
     .parse(i)
@@ -46,99 +136,82 @@ fn factor(i: &str) -> IResult<&str, Rational32> {
 
 // We apply any number of squares or cubes to a `factor`, which might be a
 // parenthesized expression
-fn exponent(i: &str) -> IResult<&str, Rational32> {
+fn exponent<V: Val>(i: &str) -> IResult<&str, V> {
     let (i, init) = factor(i)?;
     fold_many0(
         alt((char('²'), char('s'), char('³'), char('c'))),
-        move || Some(init),
+        move || Ok(init),
         |acc, op: char| {
-            acc.and_then(|acc| match op {
-                '²' | 's' => checked_pow(acc, 2),
-                '³' | 'c' => checked_pow(acc, 3),
+            acc.and_then(|acc: V| match op {
+                '²' | 's' => acc.pow(2),
+                '³' | 'c' => acc.pow(3),
                 _ => unreachable!(),
             })
         },
     )
     .parse(i)
-    .and_then(|(x, v)| {
-        v.map(|v| (x, v)).ok_or_else(|| {
-            nom::Err::Error(nom::error::Error::from_error_kind(
-                i,
-                nom::error::ErrorKind::Fail,
-            ))
-        })
-    })
+    .and_then(|(x, v)| v.map(|v| (x, v)).map_err(|e| make_err(i, e)))
 }
 
 // We read an initial factor and for each time we find
 // a * or / operator followed by another factor, we do
 // the math by folding everything
-fn term(i: &str) -> IResult<&str, Rational32> {
+fn term<V: Val>(i: &str) -> IResult<&str, V> {
     let (i, init) = exponent(i)?;
 
     fold_many0(
         pair(alt((char('*'), char('/'))), exponent),
-        move || Some(init),
-        |acc, (op, val): (char, Rational32)| {
-            acc.and_then(|acc| {
+        move || Ok(init),
+        |acc, (op, val): (char, V)| {
+            acc.and_then(|acc: V| {
                 if op == '*' {
-                    acc.checked_mul(&val)
+                    acc.mul(val)
                 } else {
-                    acc.checked_div(&val)
+                    acc.div(val)
                 }
             })
         },
     )
     .parse(i)
-    .and_then(|(x, v)| {
-        v.map(|v| (x, v)).ok_or_else(|| {
-            nom::Err::Error(nom::error::Error::from_error_kind(
-                i,
-                nom::error::ErrorKind::Fail,
-            ))
-        })
-    })
+    .and_then(|(x, v)| v.map(|v| (x, v)).map_err(|e| make_err(i, e)))
 }
 
-fn expr(i: &str) -> IResult<&str, Rational32> {
+fn expr<V: Val>(i: &str) -> IResult<&str, V> {
     let (i, init) = term(i)?;
 
     fold_many0(
         pair(alt((char('+'), char('-'))), term),
-        move || Some(init),
-        |acc, (op, val): (char, Rational32)| {
-            acc.and_then(|acc| {
+        move || Ok(init),
+        |acc, (op, val): (char, V)| {
+            acc.and_then(|acc: V| {
                 if op == '+' {
-                    acc.checked_add(&val)
+                    acc.add(val)
                 } else {
-                    acc.checked_sub(&val)
+                    acc.sub(val)
                 }
             })
         },
     )
     .parse(i)
-    .and_then(|(x, v)| {
-        v.map(|v| (x, v)).ok_or_else(|| {
-            nom::Err::Error(nom::error::Error::from_error_kind(
-                i,
-                nom::error::ErrorKind::Fail,
-            ))
-        })
-    })
+    .and_then(|(x, v)| v.map(|v| (x, v)).map_err(|e| make_err(i, e)))
 }
 
 /// Evaluate the provided string, returning an integer result or an error.
-pub fn eval(i: &str) -> Result<i32, anyhow::Error> {
-    let (rem, v) = expr(i).map_err(|e| e.to_owned())?;
-    if !rem.is_empty() {
-        anyhow::bail!("string not fully evaluated: {} rem: {}", i, rem);
-    }
+pub fn eval(i: &str) -> Result<i32, nom::Err<nom::error::Error<&str>>> {
+    match expr::<i32>(i) {
+        Ok((rem, v)) if rem.is_empty() => Ok(v),
+        Err(nom::Err::Failure(f)) if f.code == nom::error::ErrorKind::Float => {
+            let (rem, v) = expr::<Rational32>(i)?;
+            if !rem.is_empty() {
+                Err(make_err(i, ComputeError::ComputeError))?
+            }
 
-    if !v.is_integer() {
-        anyhow::bail!("did not get an integer result");
+            v.to_integer()
+                .ok_or_else(|| make_err(i, ComputeError::NonIntegerResult))
+        }
+        Ok(_) => Err(make_err(i, ComputeError::ComputeError)),
+        Err(e) => Err(e),
     }
-
-    Ok(v.to_integer())
 }
 
 #[test]

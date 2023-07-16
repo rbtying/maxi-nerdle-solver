@@ -4,6 +4,11 @@ use std::io::Write;
 
 use crate::eval::eval;
 
+pub fn gen(buf: &mut [u8], visitor: &mut dyn FnMut(&str)) {
+    gen_nz_digit(0, 0, buf, visitor);
+    gen_open(0, 0, buf, visitor);
+}
+
 fn gen_nz_digit(index: usize, depth: usize, buf: &mut [u8], visitor: &mut dyn FnMut(&str)) {
     if index >= buf.len() - 2 {
         return;
@@ -64,7 +69,9 @@ fn gen_squared(index: usize, depth: usize, buf: &mut [u8], visitor: &mut dyn FnM
         return;
     }
     buf[index] = b's';
-    try_gen_eq(index + 1, depth, buf, visitor);
+    if index >= 3 {
+        try_gen_eq(index + 1, depth, buf, visitor);
+    }
     gen_oper(index + 1, depth, buf, visitor);
     if depth > 0 {
         gen_close(index + 1, depth, buf, visitor);
@@ -76,7 +83,9 @@ fn gen_cubed(index: usize, depth: usize, buf: &mut [u8], visitor: &mut dyn FnMut
         return;
     }
     buf[index] = b'c';
-    try_gen_eq(index + 1, depth, buf, visitor);
+    if index >= 2 {
+        try_gen_eq(index + 1, depth, buf, visitor);
+    }
     gen_oper(index + 1, depth, buf, visitor);
     if depth > 0 {
         gen_close(index + 1, depth, buf, visitor);
